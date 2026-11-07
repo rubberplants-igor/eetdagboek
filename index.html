@@ -69,6 +69,9 @@ svg{width:100%;height:auto;display:block}
 .ax{fill:var(--muted);font-size:22px}
 .muted{color:var(--muted);font-size:13px}
 .hint{font-size:13px;color:var(--muted);margin:4px 0 0}
+.stepper{display:flex;gap:6px}
+.stepper button{flex:none;width:44px;padding:9px 0;font-size:20px;line-height:1}
+.stepper input{text-align:center}
 .scanknop{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;border:1px dashed var(--acc);color:var(--acc);background:var(--soft);font-weight:600}
 .scanknop svg{width:22px;height:22px;flex:none}
 #scanStatus{font-size:14px;margin-top:6px}
@@ -141,7 +144,7 @@ textarea{font:13px/1.4 ui-monospace,Menlo,monospace;width:100%;min-height:90px;p
         </select>
       </div>
       <div id="vak-hoeveelheid">
-        <label for="hoeveelheid">Hoeveelheid</label>
+        <label for="hoeveelheid" id="hoevLabel">Hoeveelheid per stuk</label>
         <input id="hoeveelheid" type="number" step="any" min="0" value="100" inputmode="decimal">
       </div>
       <div id="vak-eenheid">
@@ -160,7 +163,10 @@ textarea{font:13px/1.4 ui-monospace,Menlo,monospace;width:100%;min-height:90px;p
           <option value="0.25">een kwart</option>
         </select>
       </div>
-      <div id="vak-leeg"></div>
+      <div id="vak-aantal">
+        <label for="aantal">Aantal</label>
+        <div class="stepper"><button type="button" id="aantalMin" aria-label="Eén minder">−</button><input id="aantal" type="number" min="0.5" step="0.5" value="1" inputmode="decimal"><button type="button" id="aantalPlus" aria-label="Eén meer">+</button></div>
+      </div>
       <div>
         <label for="kcal" id="kcalLabel">kcal per 100 g</label>
         <input id="kcal" type="number" step="any" min="0" required inputmode="decimal" placeholder="van het etiket">
@@ -280,7 +286,7 @@ const DAGLANG=new Intl.DateTimeFormat('nl-NL',{weekday:'long',day:'numeric',mont
 const DEEL={'1':'heel gerecht','0.75':'¾ gerecht','0.5':'½ gerecht','0.3333':'⅓ gerecht','0.25':'¼ gerecht'};
 function factor(h,e){return e==='stuk'||e==='gerecht'?h:h/100}
 function basisTekst(e){return e==='stuk'?'per stuk':(e==='ml'?'per 100 ml':'per 100 g')}
-function hoevTekst(i){if(i.eenheid==='gerecht')return DEEL[String(i.hoeveelheid)]||(nf1.format(i.hoeveelheid)+' × gerecht');return nf1.format(i.hoeveelheid)+' '+(i.eenheid==='stuk'?'stuk':i.eenheid)}
+function hoevTekst(i){if(i.eenheid==='gerecht')return DEEL[String(i.hoeveelheid)]||(nf1.format(i.hoeveelheid)+' × gerecht');const a=i.aantal||1;if(i.eenheid==='stuk')return nf1.format(i.hoeveelheid*a)+' stuk';return(a!==1?nf1.format(a)+' × ':'')+nf1.format(i.hoeveelheid)+' '+i.eenheid}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
 
 function laad(){try{const r=localStorage.getItem(KEY);if(r){const d=JSON.parse(r);if(d&&Array.isArray(d.items))S={items:d.items,producten:d.producten||{},barcodes:d.barcodes||{},doelen:d.doelen||{kcal:null,eiwit:null}}}}catch(e){opslagOk=false}}
@@ -311,7 +317,7 @@ $('#volgende').addEventListener('click',()=>{datum.value=plus(datum.value||vanda
 function zetSoort(s){
   soort=s;const g=s==='gerecht';
   $('#soort-product').classList.toggle('on',!g);$('#soort-gerecht').classList.toggle('on',g);
-  $('#vak-scan').hidden=g;$('#vak-hoeveelheid').hidden=g;$('#vak-eenheid').hidden=g;$('#vak-deel').hidden=!g;$('#vak-leeg').hidden=g;
+  $('#vak-scan').hidden=g;$('#vak-hoeveelheid').hidden=g;$('#vak-eenheid').hidden=g;$('#vak-deel').hidden=!g;$('#vak-aantal').hidden=g;
   $('#productLabel').textContent=g?'Naam van het gerecht':'Wat heb je gegeten of gedronken?';
   $('#product').placeholder=g?'bijv. lasagne van mama':'bijv. volkoren brood';
   $('#tip').textContent=g?'Vul de kcal en het eiwit van het hele gerecht in (alle ingrediënten samen, of van de verpakking). Heb je een deel gegeten, kies dat hierboven; de app rekent het uit.':'Neem de waarden over van het etiket (per 100 g) of van voedingscentrum.nl. Wat je al eens hebt ingevoerd vult de app vanzelf aan.';
@@ -322,20 +328,23 @@ $('#soort-gerecht').addEventListener('click',()=>zetSoort('gerecht'));
 
 function labels(){
   if(soort==='gerecht'){$('#kcalLabel').textContent='kcal hele gerecht';$('#eiwitLabel').textContent='eiwit (g) hele gerecht'}
-  else{const e=$('#eenheid').value;$('#kcalLabel').textContent='kcal '+basisTekst(e);$('#eiwitLabel').textContent='eiwit (g) '+basisTekst(e)}
+  else{const e=$('#eenheid').value;$('#hoevLabel').textContent=e==='stuk'?'Hoeveel stuks':'Hoeveelheid per stuk';$('#vak-aantal').hidden=e==='stuk';$('#kcalLabel').textContent='kcal '+basisTekst(e);$('#eiwitLabel').textContent='eiwit (g) '+basisTekst(e)}
   calc();
 }
 function invoer(){
   const g=soort==='gerecht';
-  return{e:g?'gerecht':$('#eenheid').value,h:g?parseFloat($('#deel').value):parseFloat($('#hoeveelheid').value),k:parseFloat($('#kcal').value),w:parseFloat($('#eiwit').value)};
+  const a=(g||$('#eenheid').value==='stuk')?1:(parseFloat($('#aantal').value)||1);
+  return{e:g?'gerecht':$('#eenheid').value,h:g?parseFloat($('#deel').value):parseFloat($('#hoeveelheid').value),a,k:parseFloat($('#kcal').value),w:parseFloat($('#eiwit').value)};
 }
 function calc(){
   const v=invoer();
   if(isNaN(v.h)||isNaN(v.k)||isNaN(v.w)){$('#calc').textContent='';return}
-  const f=factor(v.h,v.e);
+  const f=factor(v.h,v.e)*v.a;
   $('#calc').innerHTML='Je hebt hiermee <b>'+nf0.format(v.k*f)+' kcal</b> en <b>'+nf1.format(v.w*f)+' g eiwit</b> gegeten.';
 }
-['hoeveelheid','kcal','eiwit'].forEach(id=>$('#'+id).addEventListener('input',calc));
+['hoeveelheid','aantal','kcal','eiwit'].forEach(id=>$('#'+id).addEventListener('input',calc));
+function stapAantal(d){const v=Math.max(0.5,Math.round(((parseFloat($('#aantal').value)||1)+d)*2)/2);$('#aantal').value=v;calc()}
+$('#aantalMin').addEventListener('click',()=>stapAantal(-1));$('#aantalPlus').addEventListener('click',()=>stapAantal(1));
 $('#deel').addEventListener('change',calc);
 $('#eenheid').addEventListener('change',labels);
 $('#product').addEventListener('input',()=>{
@@ -351,14 +360,14 @@ $('#form').addEventListener('submit',ev=>{
   ev.preventDefault();
   const naam=$('#product').value.trim();const v=invoer();
   if(!naam||isNaN(v.h)||isNaN(v.k)||isNaN(v.w)){$('#calc').textContent='Vul alle velden in.';return}
-  const f=factor(v.h,v.e);
-  S.items.push({id:uid(),datum:datum.value||vandaag(),maaltijd:$('#maaltijd').value,product:naam,hoeveelheid:v.h,eenheid:v.e,kcalBasis:v.k,eiwitBasis:v.w,kcal:v.k*f,eiwit:v.w*f});
+  const f=factor(v.h,v.e)*v.a;
+  S.items.push({id:uid(),datum:datum.value||vandaag(),maaltijd:$('#maaltijd').value,product:naam,hoeveelheid:v.h,aantal:v.a,eenheid:v.e,kcalBasis:v.k,eiwitBasis:v.w,kcal:v.k*f,eiwit:v.w*f});
   const p={naam,eenheid:v.e,kcalBasis:v.k,eiwitBasis:v.w};if(v.e!=='gerecht')p.laatsteHoeveelheid=v.h;
   S.producten[naam.toLowerCase()]=p;
   if(laatsteCode){S.barcodes[laatsteCode]=naam.toLowerCase();laatsteCode=null}
   scanStatus('');
   bewaar();
-  $('#product').value='';$('#kcal').value='';$('#eiwit').value='';$('#hoeveelheid').value=100;$('#eenheid').value='g';$('#deel').value='1';
+  $('#product').value='';$('#kcal').value='';$('#eiwit').value='';$('#hoeveelheid').value=100;$('#aantal').value=1;$('#eenheid').value='g';$('#deel').value='1';
   zetSoort('product');renderDag();
 });
 
@@ -641,7 +650,7 @@ async function zoekProduct(code){
   catch(e){scanTekst('Zoeken lukte niet. Heb je internet? Probeer opnieuw of vul de waarden zelf in.');return}
   laatsteCode=code;
   if(!d||d.status!==1||!d.product){
-    sluitScanner();zetSoort('product');$('#product').value='';$('#kcal').value='';$('#eiwit').value='';$('#hoeveelheid').value=100;$('#eenheid').value='g';labels();
+    sluitScanner();zetSoort('product');$('#product').value='';$('#kcal').value='';$('#eiwit').value='';$('#hoeveelheid').value=100;$('#aantal').value=1;$('#eenheid').value='g';labels();
     scanStatus('Dit product ('+code+') staat niet in de database. Vul naam en waarden van het etiket in; de volgende keer herkent de app hem wel.',true);$('#product').focus();return}
   const p=d.product,n=p.nutriments||{};
   let kcal=n['energy-kcal_100g'];if(kcal==null&&n['energy-kj_100g']!=null)kcal=n['energy-kj_100g']/4.184;if(kcal==null&&n['energy_100g']!=null)kcal=n['energy_100g']/4.184;
@@ -651,7 +660,7 @@ async function zoekProduct(code){
   const ml=p.product_quantity_unit==='ml'||/\d\s*(ml|cl|l)\b/i.test(p.quantity||'');
   sluitScanner();zetSoort('product');
   $('#product').value=naam;$('#eenheid').value=ml?'ml':'g';
-  $('#hoeveelheid').value=p.serving_quantity&&+p.serving_quantity>0?r1(+p.serving_quantity):100;
+  $('#hoeveelheid').value=p.serving_quantity&&+p.serving_quantity>0?r1(+p.serving_quantity):100;$('#aantal').value=1;
   $('#kcal').value=kcal!=null&&!isNaN(kcal)?r1(+kcal):'';$('#eiwit').value=eiwit!=null&&!isNaN(eiwit)?r1(+eiwit):'';labels();
   const mist=[];if($('#kcal').value==='')mist.push('calorieën');if($('#eiwit').value==='')mist.push('eiwit');
   scanStatus('Gevonden: '+naam+'. Controleer de waarden op het etiket en vul in hoeveel je at.'+(mist.length?' Let op: '+mist.join(' en ')+' ontbreekt, vul dat zelf in.':''),mist.length>0);
