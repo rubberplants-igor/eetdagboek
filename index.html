@@ -77,12 +77,16 @@ svg{width:100%;height:auto;display:block}
 .scanbox{position:relative;width:100%;max-width:520px;margin:0 auto;aspect-ratio:3/4;max-height:58vh;border-radius:14px;overflow:hidden;background:#111}
 .scanbox video{width:100%;height:100%;object-fit:cover;display:block}
 .scanlijn{position:absolute;left:10%;right:10%;top:50%;height:2px;background:#e8be5e;box-shadow:0 0 0 1px rgba(0,0,0,.3)}
-.scankader{position:absolute;left:8%;right:8%;top:32%;bottom:32%;border:2px solid rgba(255,255,255,.85);border-radius:10px}
+.scankader{position:absolute;left:7%;right:7%;top:34%;bottom:34%;border:2px solid rgba(255,255,255,.85);border-radius:10px}
 #scanMelding{text-align:center;margin:0;font-size:15px;min-height:2.6em}
 .scanalt{display:flex;gap:8px;max-width:520px;width:100%;margin:0 auto}
 .scanalt input{background:#1c1c1c;color:#fff;border-color:#444}
 .scanbtns{display:flex;gap:8px;max-width:520px;width:100%;margin:0 auto}
 .scanbtns>*{flex:1;text-align:center}
+.scanextra{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;max-width:520px;width:100%;margin:0 auto}
+.zoomrij{display:flex;gap:6px}
+.scanner .scanextra button{padding:8px 14px;border-radius:999px}
+.scanner .scanextra button.on{background:#e8be5e;border-color:#e8be5e;color:#14170f;font-weight:600}
 .scanner button,.fotoknop{background:#2a2a2a;color:#fff;border:1px solid #444;border-radius:10px;padding:11px 12px;font:inherit;cursor:pointer}
 .scanner button.pri{background:#94c374;border-color:#94c374;color:#14170f;font-weight:600}
 .btns{display:flex;gap:8px;flex-wrap:wrap}
@@ -250,6 +254,7 @@ textarea{font:13px/1.4 ui-monospace,Menlo,monospace;width:100%;min-height:90px;p
 
 <div id="scanner" class="scanner" hidden role="dialog" aria-modal="true" aria-label="Barcode scannen">
   <div class="scanbox"><video id="scanVideo" playsinline muted autoplay></video><div class="scankader"></div><div class="scanlijn"></div></div>
+  <div id="scanExtra" class="scanextra" hidden><div id="zoomRij" class="zoomrij"></div><button type="button" id="lampKnop" hidden>Lamp</button></div>
   <p id="scanMelding">Richt de camera op de barcode.</p>
   <div class="scanalt"><input id="scanCode" inputmode="numeric" pattern="[0-9]*" placeholder="of typ de cijfers onder de barcode" aria-label="Cijfers van de barcode"><button type="button" id="scanZoek" class="pri">Zoek</button></div>
   <div class="scanbtns"><label class="fotoknop" for="scanFoto">Foto van barcode</label><input type="file" id="scanFoto" accept="image/*" capture="environment" hidden><button type="button" id="scanSluit">Sluiten</button></div>
@@ -541,24 +546,87 @@ function renderInstellingen(){
 }
 
 /* ---------- barcode scannen ---------- */
-let reader=null,laatsteCode=null,scanBezig=false;
+let laatsteCode=null,scanBezig=false;
 const ZX_URL='https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
 function scanTekst(t){$('#scanMelding').textContent=t}
 function scanStatus(t,fout){const el=$('#scanStatus');el.textContent=t;el.classList.toggle('fout',!!fout)}
 function laadZX(){if(window.ZXing)return Promise.resolve();return new Promise((ok,nok)=>{const sc=document.createElement('script');sc.src=ZX_URL;sc.onload=()=>ok();sc.onerror=()=>nok(new Error('laden'));document.head.appendChild(sc)})}
-function maakReader(){const h=new Map();const F=ZXing.BarcodeFormat;h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E]);h.set(ZXing.DecodeHintType.TRY_HARDER,true);return new ZXing.BrowserMultiFormatReader(h,300)}
-function stopScan(){try{reader&&reader.reset()}catch(e){}reader=null;const v=$('#scanVideo');if(v.srcObject){try{v.srcObject.getTracks().forEach(t=>t.stop())}catch(e){}v.srcObject=null}}
+let stream=null,track=null,lusId=0,mfr=null,detector=null,lampAan=false;
+const scanCanvas=document.createElement('canvas');const sctx=scanCanvas.getContext('2d',{willReadFrequently:true});
+function hints(){const h=new Map();const F=ZXing.BarcodeFormat;h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E]);h.set(ZXing.DecodeHintType.TRY_HARDER,true);return h}
+function lees(canvas,omkeer){
+  // eerst de ingebouwde detector (snel, waar beschikbaar), anders ZXing
+  if(!mfr){mfr=new ZXing.MultiFormatReader();mfr.setHints(hints())}
+  const bron=new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+  const bins=omkeer?[new ZXing.GlobalHistogramBinarizer(bron)]:[new ZXing.HybridBinarizer(bron)];
+  for(const b of bins){try{return mfr.decodeWithState(new ZXing.BinaryBitmap(b)).getText()}catch(e){}finally{try{mfr.reset()}catch(e){}}}
+  return null;
+}
+function kaderUitsnede(){
+  const v=$('#scanVideo'),vw=v.videoWidth,vh=v.videoHeight;if(!vw||!vh)return null;
+  const r=v.getBoundingClientRect(),f=$('.scankader').getBoundingClientRect();
+  const sc=Math.max(r.width/vw,r.height/vh),ox=(r.width-vw*sc)/2,oy=(r.height-vh*sc)/2;
+  // kader plus ruime marge, in videopixels
+  let sx=(f.left-r.left-ox)/sc,sy=(f.top-r.top-oy)/sc,sw=f.width/sc,sh=f.height/sc;
+  const mx=sw*0.12,my=sh*0.35;sx-=mx;sy-=my;sw+=2*mx;sh+=2*my;
+  sx=Math.max(0,sx);sy=Math.max(0,sy);sw=Math.min(vw-sx,sw);sh=Math.min(vh-sy,sh);
+  return[sx,sy,sw,sh];
+}
+let teller=0;
+async function lus(id){
+  if(id!==lusId)return;
+  const v=$('#scanVideo');const u=kaderUitsnede();
+  if(u&&v.readyState>=2){
+    const[sx,sy,sw,sh]=u;const doelW=Math.min(1280,Math.round(sw));const k=doelW/sw;
+    scanCanvas.width=doelW;scanCanvas.height=Math.max(1,Math.round(sh*k));
+    sctx.drawImage(v,sx,sy,sw,sh,0,0,scanCanvas.width,scanCanvas.height);
+    let code=null;
+    if(detector){try{const r=await detector.detect(scanCanvas);if(r&&r.length)code=r[0].rawValue}catch(e){}}
+    if(!code&&window.ZXing)code=lees(scanCanvas,(teller++)%3===2);
+    if(id!==lusId)return;
+    if(code){gevonden(code);return}
+  }
+  setTimeout(()=>requestAnimationFrame(()=>lus(id)),60);
+}
+function stopScan(){lusId++;try{stream&&stream.getTracks().forEach(t=>t.stop())}catch(e){}stream=null;track=null;lampAan=false;const v=$('#scanVideo');v.srcObject=null;$('#scanExtra').hidden=true}
 function sluitScanner(){stopScan();$('#scanner').hidden=true;document.body.style.overflow=''}
+async function zetZoom(z){if(!track)return;try{await track.applyConstraints({advanced:[{zoom:z}]})}catch(e){}document.querySelectorAll('[data-zoom]').forEach(b=>b.classList.toggle('on',+b.dataset.zoom===z))}
 async function openScanner(){
   scanBezig=false;$('#scanner').hidden=false;document.body.style.overflow='hidden';$('#scanCode').value='';scanTekst('Camera starten…');
-  try{await laadZX()}catch(e){scanTekst('De scanner kan niet laden (geen internet?). Typ de cijfers onder de barcode.');return}
-  reader=maakReader();
-  const cb=(res)=>{if(res)gevonden(res.getText())};
+  if('BarcodeDetector' in window){try{const f=await BarcodeDetector.getSupportedFormats();if(f.includes('ean_13'))detector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e'].filter(x=>f.includes(x))})}catch(e){detector=null}}
+  const zx=laadZX().catch(()=>null);
   try{
-    if(reader.decodeFromConstraints)await reader.decodeFromConstraints({video:{facingMode:{ideal:'environment'}}},$('#scanVideo'),cb);
-    else await reader.decodeFromVideoDevice(undefined,$('#scanVideo'),cb);
-    scanTekst('Richt de camera op de barcode. Houd hem stil, op ongeveer 15 cm.');
-  }catch(e){scanTekst('De camera kan niet worden gebruikt. Sta cameratoegang toe, of maak een foto van de barcode of typ de cijfers.')}
+    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});
+  }catch(e){scanTekst('De camera kan niet worden gebruikt. Sta cameratoegang toe (Instellingen › Safari › Camera), of maak een foto van de barcode.');return}
+  const v=$('#scanVideo');v.srcObject=stream;try{await v.play()}catch(e){}
+  track=stream.getVideoTracks()[0];
+  let caps={};try{caps=track.getCapabilities?track.getCapabilities():{}}catch(e){}
+  const adv=[];if(caps.focusMode&&caps.focusMode.includes('continuous'))adv.push({focusMode:'continuous'});
+  if(adv.length){try{await track.applyConstraints({advanced:adv})}catch(e){}}
+  const extra=$('#scanExtra');let toon=false;
+  const zr=$('#zoomRij');zr.innerHTML='';
+  if(caps.zoom&&caps.zoom.max>=1.5){
+    const stappen=[1,1.5,2,3].filter(z=>z>=caps.zoom.min&&z<=caps.zoom.max);
+    zr.innerHTML=stappen.map(z=>'<button type="button" data-zoom="'+z+'">'+String(z).replace('.',',')+'×</button>').join('');
+    zr.querySelectorAll('[data-zoom]').forEach(b=>b.addEventListener('click',()=>zetZoom(+b.dataset.zoom)));
+    await zetZoom(stappen.includes(1.5)?1.5:stappen[0]);toon=true;
+  }
+  $('#lampKnop').hidden=!caps.torch;if(caps.torch)toon=true;
+  extra.hidden=!toon;
+  await zx;
+  if(!window.ZXing&&!detector){scanTekst('De scanner kan niet laden (geen internet?). Maak een foto of typ de cijfers.');return}
+  scanTekst('Houd de barcode recht in het kader, 20 à 30 cm van de telefoon.');
+  const id=++lusId;lus(id);
+}
+$('#lampKnop').addEventListener('click',async()=>{if(!track)return;lampAan=!lampAan;try{await track.applyConstraints({advanced:[{torch:lampAan}]})}catch(e){lampAan=false}$('#lampKnop').classList.toggle('on',lampAan)});
+async function leesAfbeelding(img){
+  // grote foto: verkleinen en in stroken proberen
+  const W=img.naturalWidth||img.width,H=img.naturalHeight||img.height;const c=document.createElement('canvas'),x=c.getContext('2d',{willReadFrequently:true});
+  const pogingen=[[0,0,W,H,1600],[W*.1,H*.3,W*.8,H*.4,1400],[0,H*.2,W,H*.6,1600],[W*.2,H*.35,W*.6,H*.3,1200]];
+  for(const[sx,sy,sw,sh,mw]of pogingen){const k=Math.min(1,mw/sw);c.width=Math.round(sw*k);c.height=Math.round(sh*k);x.drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);
+    if(detector){try{const r=await detector.detect(c);if(r&&r.length)return r[0].rawValue}catch(e){}}
+    for(const om of[false,true]){const t=lees(c,om);if(t)return t}}
+  return null;
 }
 async function gevonden(code){if(scanBezig)return;scanBezig=true;stopScan();try{navigator.vibrate&&navigator.vibrate(60)}catch(e){}await zoekProduct(code);scanBezig=false}
 function r1(v){return Math.round(v*10)/10}
@@ -594,8 +662,9 @@ $('#scanZoek').addEventListener('click',()=>{stopScan();zoekProduct($('#scanCode
 $('#scanCode').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();stopScan();zoekProduct($('#scanCode').value)}});
 $('#scanFoto').addEventListener('change',async e=>{
   const f=e.target.files[0];e.target.value='';if(!f)return;stopScan();scanTekst('Foto lezen…');
-  try{await laadZX();const url=URL.createObjectURL(f);const res=await maakReader().decodeFromImageUrl(url);URL.revokeObjectURL(url);gevonden(res.getText())}
-  catch(err){scanTekst('Geen barcode gevonden op de foto. Maak de foto van dichtbij en scherp, of typ de cijfers.')}
+  try{await laadZX();const url=URL.createObjectURL(f);const img=new Image();img.src=url;await img.decode();const t=await leesAfbeelding(img);URL.revokeObjectURL(url);
+    if(t)gevonden(t);else scanTekst('Geen barcode gevonden op de foto. Maak de foto van dichtbij, scherp en recht, of typ de cijfers.')}
+  catch(err){scanTekst('Geen barcode gevonden op de foto. Maak de foto van dichtbij, scherp en recht, of typ de cijfers.')}
 });
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&!$('#scanner').hidden)sluitScanner()});
 
