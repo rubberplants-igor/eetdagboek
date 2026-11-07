@@ -69,6 +69,22 @@ svg{width:100%;height:auto;display:block}
 .ax{fill:var(--muted);font-size:22px}
 .muted{color:var(--muted);font-size:13px}
 .hint{font-size:13px;color:var(--muted);margin:4px 0 0}
+.scanknop{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;border:1px dashed var(--acc);color:var(--acc);background:var(--soft);font-weight:600}
+.scanknop svg{width:22px;height:22px;flex:none}
+#scanStatus{font-size:14px;margin-top:6px}
+#scanStatus.fout{color:var(--warn)}
+.scanner{position:fixed;inset:0;z-index:50;background:#000;color:#fff;display:flex;flex-direction:column;gap:12px;padding:calc(12px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));overflow-y:auto}
+.scanbox{position:relative;width:100%;max-width:520px;margin:0 auto;aspect-ratio:3/4;max-height:58vh;border-radius:14px;overflow:hidden;background:#111}
+.scanbox video{width:100%;height:100%;object-fit:cover;display:block}
+.scanlijn{position:absolute;left:10%;right:10%;top:50%;height:2px;background:#e8be5e;box-shadow:0 0 0 1px rgba(0,0,0,.3)}
+.scankader{position:absolute;left:8%;right:8%;top:32%;bottom:32%;border:2px solid rgba(255,255,255,.85);border-radius:10px}
+#scanMelding{text-align:center;margin:0;font-size:15px;min-height:2.6em}
+.scanalt{display:flex;gap:8px;max-width:520px;width:100%;margin:0 auto}
+.scanalt input{background:#1c1c1c;color:#fff;border-color:#444}
+.scanbtns{display:flex;gap:8px;max-width:520px;width:100%;margin:0 auto}
+.scanbtns>*{flex:1;text-align:center}
+.scanner button,.fotoknop{background:#2a2a2a;color:#fff;border:1px solid #444;border-radius:10px;padding:11px 12px;font:inherit;cursor:pointer}
+.scanner button.pri{background:#94c374;border-color:#94c374;color:#14170f;font-weight:600}
 .btns{display:flex;gap:8px;flex-wrap:wrap}
 .melding{font-size:14px;margin-top:8px;color:var(--acc);min-height:1em}
 .melding.fout{color:var(--warn)}
@@ -104,6 +120,10 @@ textarea{font:13px/1.4 ui-monospace,Menlo,monospace;width:100%;min-height:90px;p
           <button type="button" id="soort-product" class="on">Los product</button>
           <button type="button" id="soort-gerecht">Heel gerecht</button>
         </div>
+      </div>
+      <div class="full" id="vak-scan">
+        <button type="button" id="scanKnop" class="scanknop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>Scan barcode</button>
+        <div id="scanStatus" aria-live="polite"></div>
       </div>
       <div class="full">
         <label for="product" id="productLabel">Wat heb je gegeten of gedronken?</label>
@@ -228,11 +248,18 @@ textarea{font:13px/1.4 ui-monospace,Menlo,monospace;width:100%;min-height:90px;p
 </section>
 </div>
 
+<div id="scanner" class="scanner" hidden role="dialog" aria-modal="true" aria-label="Barcode scannen">
+  <div class="scanbox"><video id="scanVideo" playsinline muted autoplay></video><div class="scankader"></div><div class="scanlijn"></div></div>
+  <p id="scanMelding">Richt de camera op de barcode.</p>
+  <div class="scanalt"><input id="scanCode" inputmode="numeric" pattern="[0-9]*" placeholder="of typ de cijfers onder de barcode" aria-label="Cijfers van de barcode"><button type="button" id="scanZoek" class="pri">Zoek</button></div>
+  <div class="scanbtns"><label class="fotoknop" for="scanFoto">Foto van barcode</label><input type="file" id="scanFoto" accept="image/*" capture="environment" hidden><button type="button" id="scanSluit">Sluiten</button></div>
+</div>
+
 <script>
 (function(){
 const KEY='eetdagboek-v1';
 const MOMENTEN=['Ontbijt','Lunch','Avondeten','Tussendoor'];
-let S={items:[],producten:{},doelen:{kcal:null,eiwit:null}};
+let S={items:[],producten:{},barcodes:{},doelen:{kcal:null,eiwit:null}};
 let opslagOk=true, soort='product', downloads=null, teHerstellen=null;
 
 const $=s=>document.querySelector(s);
@@ -251,7 +278,7 @@ function basisTekst(e){return e==='stuk'?'per stuk':(e==='ml'?'per 100 ml':'per 
 function hoevTekst(i){if(i.eenheid==='gerecht')return DEEL[String(i.hoeveelheid)]||(nf1.format(i.hoeveelheid)+' × gerecht');return nf1.format(i.hoeveelheid)+' '+(i.eenheid==='stuk'?'stuk':i.eenheid)}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
 
-function laad(){try{const r=localStorage.getItem(KEY);if(r){const d=JSON.parse(r);if(d&&Array.isArray(d.items))S={items:d.items,producten:d.producten||{},doelen:d.doelen||{kcal:null,eiwit:null}}}}catch(e){opslagOk=false}}
+function laad(){try{const r=localStorage.getItem(KEY);if(r){const d=JSON.parse(r);if(d&&Array.isArray(d.items))S={items:d.items,producten:d.producten||{},barcodes:d.barcodes||{},doelen:d.doelen||{kcal:null,eiwit:null}}}}catch(e){opslagOk=false}}
 function bewaar(){try{localStorage.setItem(KEY,JSON.stringify(S));opslagOk=true}catch(e){opslagOk=false}status()}
 function status(){$('#opslagStatus').textContent=opslagOk?'Alles wordt automatisch bewaard op dit apparaat.':'Let op: deze browser bewaart niets (privévenster?). Open de link in een gewoon venster.'}
 function melding(el,tekst,fout){el.textContent=tekst;el.classList.toggle('fout',!!fout);clearTimeout(el._t);el._t=setTimeout(()=>{el.textContent=''},5000)}
@@ -279,7 +306,7 @@ $('#volgende').addEventListener('click',()=>{datum.value=plus(datum.value||vanda
 function zetSoort(s){
   soort=s;const g=s==='gerecht';
   $('#soort-product').classList.toggle('on',!g);$('#soort-gerecht').classList.toggle('on',g);
-  $('#vak-hoeveelheid').hidden=g;$('#vak-eenheid').hidden=g;$('#vak-deel').hidden=!g;$('#vak-leeg').hidden=g;
+  $('#vak-scan').hidden=g;$('#vak-hoeveelheid').hidden=g;$('#vak-eenheid').hidden=g;$('#vak-deel').hidden=!g;$('#vak-leeg').hidden=g;
   $('#productLabel').textContent=g?'Naam van het gerecht':'Wat heb je gegeten of gedronken?';
   $('#product').placeholder=g?'bijv. lasagne van mama':'bijv. volkoren brood';
   $('#tip').textContent=g?'Vul de kcal en het eiwit van het hele gerecht in (alle ingrediënten samen, of van de verpakking). Heb je een deel gegeten, kies dat hierboven; de app rekent het uit.':'Neem de waarden over van het etiket (per 100 g) of van voedingscentrum.nl. Wat je al eens hebt ingevoerd vult de app vanzelf aan.';
@@ -323,6 +350,8 @@ $('#form').addEventListener('submit',ev=>{
   S.items.push({id:uid(),datum:datum.value||vandaag(),maaltijd:$('#maaltijd').value,product:naam,hoeveelheid:v.h,eenheid:v.e,kcalBasis:v.k,eiwitBasis:v.w,kcal:v.k*f,eiwit:v.w*f});
   const p={naam,eenheid:v.e,kcalBasis:v.k,eiwitBasis:v.w};if(v.e!=='gerecht')p.laatsteHoeveelheid=v.h;
   S.producten[naam.toLowerCase()]=p;
+  if(laatsteCode){S.barcodes[laatsteCode]=naam.toLowerCase();laatsteCode=null}
+  scanStatus('');
   bewaar();
   $('#product').value='';$('#kcal').value='';$('#eiwit').value='';$('#hoeveelheid').value=100;$('#eenheid').value='g';$('#deel').value='1';
   zetSoort('product');renderDag();
@@ -494,7 +523,7 @@ $('#herstelCode').addEventListener('click',()=>vraagHerstel($('#herstelTekst').v
 $('#herstelBestand').addEventListener('change',e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=()=>vraagHerstel(String(r.result));r.readAsText(file);e.target.value=''});
 $('#herstelNee').addEventListener('click',()=>{teHerstellen=null;$('#herstelBevestig').hidden=true});
 $('#herstelJa').addEventListener('click',()=>{
-  if(!teHerstellen)return;S={items:teHerstellen.items,producten:teHerstellen.producten||{},doelen:teHerstellen.doelen||{kcal:null,eiwit:null}};
+  if(!teHerstellen)return;S={items:teHerstellen.items,producten:teHerstellen.producten||{},barcodes:teHerstellen.barcodes||{},doelen:teHerstellen.doelen||{kcal:null,eiwit:null}};
   teHerstellen=null;$('#herstelBevestig').hidden=true;$('#herstelTekst').value='';bewaar();renderDag();renderInstellingen();melding($('#bkMelding'),'Back-up teruggezet.');
 });
 
@@ -510,6 +539,65 @@ function renderInstellingen(){
     '</table></div><p class="hint">Weghalen verwijdert alleen de suggestie, niet wat je al hebt ingevoerd.</p>';
   $('#productbeheer').querySelectorAll('[data-pdel]').forEach(b=>wisKnop(b,()=>{delete S.producten[b.dataset.pdel];bewaar();renderInstellingen();renderDag()}));
 }
+
+/* ---------- barcode scannen ---------- */
+let reader=null,laatsteCode=null,scanBezig=false;
+const ZX_URL='https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+function scanTekst(t){$('#scanMelding').textContent=t}
+function scanStatus(t,fout){const el=$('#scanStatus');el.textContent=t;el.classList.toggle('fout',!!fout)}
+function laadZX(){if(window.ZXing)return Promise.resolve();return new Promise((ok,nok)=>{const sc=document.createElement('script');sc.src=ZX_URL;sc.onload=()=>ok();sc.onerror=()=>nok(new Error('laden'));document.head.appendChild(sc)})}
+function maakReader(){const h=new Map();const F=ZXing.BarcodeFormat;h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E]);h.set(ZXing.DecodeHintType.TRY_HARDER,true);return new ZXing.BrowserMultiFormatReader(h,300)}
+function stopScan(){try{reader&&reader.reset()}catch(e){}reader=null;const v=$('#scanVideo');if(v.srcObject){try{v.srcObject.getTracks().forEach(t=>t.stop())}catch(e){}v.srcObject=null}}
+function sluitScanner(){stopScan();$('#scanner').hidden=true;document.body.style.overflow=''}
+async function openScanner(){
+  scanBezig=false;$('#scanner').hidden=false;document.body.style.overflow='hidden';$('#scanCode').value='';scanTekst('Camera starten…');
+  try{await laadZX()}catch(e){scanTekst('De scanner kan niet laden (geen internet?). Typ de cijfers onder de barcode.');return}
+  reader=maakReader();
+  const cb=(res)=>{if(res)gevonden(res.getText())};
+  try{
+    if(reader.decodeFromConstraints)await reader.decodeFromConstraints({video:{facingMode:{ideal:'environment'}}},$('#scanVideo'),cb);
+    else await reader.decodeFromVideoDevice(undefined,$('#scanVideo'),cb);
+    scanTekst('Richt de camera op de barcode. Houd hem stil, op ongeveer 15 cm.');
+  }catch(e){scanTekst('De camera kan niet worden gebruikt. Sta cameratoegang toe, of maak een foto van de barcode of typ de cijfers.')}
+}
+async function gevonden(code){if(scanBezig)return;scanBezig=true;stopScan();try{navigator.vibrate&&navigator.vibrate(60)}catch(e){}await zoekProduct(code);scanBezig=false}
+function r1(v){return Math.round(v*10)/10}
+async function zoekProduct(code){
+  code=String(code).replace(/\D/g,'');
+  if(code.length<8){scanTekst('Dat is geen geldige barcode. Een barcode heeft 8 of 13 cijfers.');return}
+  const bekend=S.barcodes[code]&&S.producten[S.barcodes[code]];
+  if(bekend){sluitScanner();zetSoort('product');$('#product').value=bekend.naam;$('#eenheid').value=bekend.eenheid;if(bekend.laatsteHoeveelheid)$('#hoeveelheid').value=bekend.laatsteHoeveelheid;$('#kcal').value=bekend.kcalBasis;$('#eiwit').value=bekend.eiwitBasis;labels();laatsteCode=code;scanStatus('Herkend: '+bekend.naam+'. Pas de hoeveelheid aan en tik op Toevoegen.');return}
+  scanTekst('Zoeken naar '+code+'…');
+  let d;
+  try{const r=await fetch('https://world.openfoodfacts.org/api/v2/product/'+code+'.json?fields=product_name,product_name_nl,brands,nutriments,serving_quantity,product_quantity_unit,quantity');d=await r.json()}
+  catch(e){scanTekst('Zoeken lukte niet. Heb je internet? Probeer opnieuw of vul de waarden zelf in.');return}
+  laatsteCode=code;
+  if(!d||d.status!==1||!d.product){
+    sluitScanner();zetSoort('product');$('#product').value='';$('#kcal').value='';$('#eiwit').value='';$('#hoeveelheid').value=100;$('#eenheid').value='g';labels();
+    scanStatus('Dit product ('+code+') staat niet in de database. Vul naam en waarden van het etiket in; de volgende keer herkent de app hem wel.',true);$('#product').focus();return}
+  const p=d.product,n=p.nutriments||{};
+  let kcal=n['energy-kcal_100g'];if(kcal==null&&n['energy-kj_100g']!=null)kcal=n['energy-kj_100g']/4.184;if(kcal==null&&n['energy_100g']!=null)kcal=n['energy_100g']/4.184;
+  const eiwit=n['proteins_100g'];
+  let naam=(p.product_name_nl||p.product_name||'').trim();const merk=(p.brands||'').split(',')[0].trim();
+  if(merk&&naam&&merk.length<=18&&!/[\/.]|\b(sa|nv|bv|gmbh|ltd|inc)\b/i.test(merk)&&naam.toLowerCase().indexOf(merk.toLowerCase())<0)naam=merk+' '+naam;if(!naam)naam=merk||('Product '+code);
+  const ml=p.product_quantity_unit==='ml'||/\d\s*(ml|cl|l)\b/i.test(p.quantity||'');
+  sluitScanner();zetSoort('product');
+  $('#product').value=naam;$('#eenheid').value=ml?'ml':'g';
+  $('#hoeveelheid').value=p.serving_quantity&&+p.serving_quantity>0?r1(+p.serving_quantity):100;
+  $('#kcal').value=kcal!=null&&!isNaN(kcal)?r1(+kcal):'';$('#eiwit').value=eiwit!=null&&!isNaN(eiwit)?r1(+eiwit):'';labels();
+  const mist=[];if($('#kcal').value==='')mist.push('calorieën');if($('#eiwit').value==='')mist.push('eiwit');
+  scanStatus('Gevonden: '+naam+'. Controleer de waarden op het etiket en vul in hoeveel je at.'+(mist.length?' Let op: '+mist.join(' en ')+' ontbreekt, vul dat zelf in.':''),mist.length>0);
+}
+$('#scanKnop').addEventListener('click',openScanner);
+$('#scanSluit').addEventListener('click',sluitScanner);
+$('#scanZoek').addEventListener('click',()=>{stopScan();zoekProduct($('#scanCode').value)});
+$('#scanCode').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();stopScan();zoekProduct($('#scanCode').value)}});
+$('#scanFoto').addEventListener('change',async e=>{
+  const f=e.target.files[0];e.target.value='';if(!f)return;stopScan();scanTekst('Foto lezen…');
+  try{await laadZX();const url=URL.createObjectURL(f);const res=await maakReader().decodeFromImageUrl(url);URL.revokeObjectURL(url);gevonden(res.getText())}
+  catch(err){scanTekst('Geen barcode gevonden op de foto. Maak de foto van dichtbij en scherp, of typ de cijfers.')}
+});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&!$('#scanner').hidden)sluitScanner()});
 
 laad();zetSoort('product');renderDag();status();
 
